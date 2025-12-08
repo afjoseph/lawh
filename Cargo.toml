@@ -1,0 +1,24 @@
+[package]
+name = "lawh"
+version = "1.0.0"
+edition = "2024"
+
+[[bin]]
+name = "cli"
+path = "src/bin/cli/main.rs"
+
+[[bin]]
+name = "gen_test_maildir"
+path = "src/bin/gen_test_maildir/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+log = "0.4"
+chrono = "0.4"
+clap = { version = "4.5", features = ["derive"] }
+env_logger = "0.11"
+mail-parser = "0.11"
+lettre = { version = "0.11", default-features = false, features = ["builder"] }
+rand = "0.8"
+uuid = { version = "1.0", features = ["v4"] }
+linkify = "0.10"
