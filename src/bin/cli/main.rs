@@ -23,6 +23,13 @@ struct Cli {
         help = "Input directory (i.e., the maildir path)"
     )]
     indir_path: String,
+
+    #[arg(
+        long = "inboxes",
+        value_name = "PATHS",
+        help = "Comma-separated list of specific maildir paths relative to indir (e.g., Folders/discuss@dev.kazimi.io,Folders/patches@dev.kazimi.io)"
+    )]
+    inboxes: Option<String>,
 }
 
 // Check if a directory is a maildir by looking for cur/ or new/ subdirectories
@@ -79,13 +86,47 @@ fn main() {
     let cli = Cli::parse();
     log::info!("Arg: Output Directory: {}", cli.outdir_path);
     log::info!("Arg: Input Directory: {}", cli.indir_path);
-
-    // Collect all maildirs recursively
-    let mut maildir_paths: Vec<std::path::PathBuf> = Vec::new();
-    for entry in std::fs::read_dir(&cli.indir_path).expect("reading maildir input directory") {
-        let entry = entry.expect("reading directory entry");
-        collect_maildirs(&entry.path(), &mut maildir_paths);
+    if let Some(ref inboxes) = cli.inboxes {
+        log::info!("Arg: Inboxes: {}", inboxes);
     }
+
+    let indir = std::path::Path::new(&cli.indir_path);
+
+    // Collect maildirs based on whether --inboxes was specified
+    let maildir_paths: Vec<std::path::PathBuf> = if let Some(ref inboxes) = cli.inboxes {
+        // User specified specific inboxes, validate each one exists and is a maildir
+        let paths: Vec<std::path::PathBuf> = inboxes
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|relative_path| {
+                let full_path = indir.join(relative_path);
+                if !full_path.exists() {
+                    panic!("Inbox path does not exist: {:?}", full_path);
+                }
+                if !is_maildir(&full_path) {
+                    panic!(
+                        "Path is not a valid maildir (missing cur/ or new/): {:?}",
+                        full_path
+                    );
+                }
+                full_path
+            })
+            .collect();
+
+        if paths.is_empty() {
+            panic!("No valid inbox paths provided in --inboxes argument");
+        }
+        paths
+    } else {
+        // No specific inboxes specified, collect all maildirs recursively
+        let mut paths: Vec<std::path::PathBuf> = Vec::new();
+        for entry in std::fs::read_dir(indir).expect("reading maildir input directory") {
+            let entry = entry.expect("reading directory entry");
+            collect_maildirs(&entry.path(), &mut paths);
+        }
+        paths
+    };
 
     let mut lists: Vec<MailingList> = Vec::new();
     for maildir_path in maildir_paths {
