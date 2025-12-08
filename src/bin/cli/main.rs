@@ -25,6 +25,50 @@ struct Cli {
     indir_path: String,
 }
 
+// Check if a directory is a maildir by looking for cur/ or new/ subdirectories
+fn is_maildir(path: &std::path::Path) -> bool {
+    path.join("cur").is_dir() || path.join("new").is_dir()
+}
+
+// Recursively collect all maildirs from a directory
+// If the directory itself is a maildir, return it
+// Otherwise, recurse into subdirectories looking for maildirs
+//
+// We're expecting a mailbox entry here, like:
+// /my-maildir
+// ├── patches
+// │   ├── cur
+// │   ├── new
+// │   └── tmp
+// ├── discuss
+// │   ├── cur
+// │   ├── new
+// │   └── tmp
+// └── Folders
+//     └── nested-list
+//         ├── cur
+//         ├── new
+//         └── tmp
+fn collect_maildirs(path: &std::path::Path, results: &mut Vec<std::path::PathBuf>) {
+    let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
+    // Skip hidden directories and the standard maildir subdirs
+    if dir_name.starts_with('.') || ["cur", "new", "tmp"].contains(&dir_name) {
+        return;
+    }
+
+    if is_maildir(path) {
+        results.push(path.to_path_buf());
+    } else if path.is_dir() {
+        // Not a maildir, recurse into children
+        if let Ok(entries) = std::fs::read_dir(path) {
+            for entry in entries.flatten() {
+                collect_maildirs(&entry.path(), results);
+            }
+        }
+    }
+}
+
 fn main() {
     // Init logger
     env_logger::Builder::from_default_env()
@@ -36,27 +80,18 @@ fn main() {
     log::info!("Arg: Output Directory: {}", cli.outdir_path);
     log::info!("Arg: Input Directory: {}", cli.indir_path);
 
+    // Collect all maildirs recursively
+    let mut maildir_paths: Vec<std::path::PathBuf> = Vec::new();
+    for entry in std::fs::read_dir(&cli.indir_path).expect("reading maildir input directory") {
+        let entry = entry.expect("reading directory entry");
+        collect_maildirs(&entry.path(), &mut maildir_paths);
+    }
+
     let mut lists: Vec<MailingList> = Vec::new();
-    for maildir in std::fs::read_dir(&cli.indir_path).expect("reading maildir input directory") {
-        // We're expecting a mailbox entry here, like:
-        // /my-maildir
-        // ├── patches
-        // ├────── cur
-        // ├────── new
-        // ├────── tmp
-        // ├── discuss
-        // ├────── cur
-        // ├────── new
-        // ├────── tmp
-        let maildir = maildir.expect("reading maildir entry");
-        let dir_name = maildir.file_name().into_string().unwrap();
-        // Skip cur, new, tmp directories and hidden files
-        if dir_name.starts_with('.') || ["cur", "new", "tmp"].contains(&dir_name.as_str()) {
-            continue;
-        }
-        log::info!("Working with list: {:?}", maildir.path());
+    for maildir_path in maildir_paths {
+        log::info!("Working with list: {:?}", maildir_path);
         let mailing_list =
-            MailingList::from_maildir_path(&maildir.path()).expect("parsing maildir");
+            MailingList::from_maildir_path(&maildir_path).expect("parsing maildir");
         log::info!(
             "Parsed {} threads with {} total messages",
             mailing_list.threads.len(),
